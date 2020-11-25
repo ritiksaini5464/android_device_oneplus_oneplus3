@@ -21,9 +21,9 @@ $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
 $(call inherit-product, device/oneplus/oneplus3/device.mk)
 
 # Inherit some common Nitrogen stuff.
-$(call inherit-product, vendor/nitrogen/products/common.mk)
+$(call inherit-product, vendor/octavi/config/common.mk)
 
-PRODUCT_NAME := nitrogen_oneplus3
+PRODUCT_NAME := octavi_oneplus3
 PRODUCT_DEVICE := oneplus3
 PRODUCT_BRAND := OnePlus
 PRODUCT_MODEL := OnePlus
