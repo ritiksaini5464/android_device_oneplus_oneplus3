@@ -223,6 +223,9 @@ PRODUCT_PROPERTY_OVERRIDES += \
 PRODUCT_PACKAGES += \
     android.hardware.camera.provider@2.4-impl \
     android.hardware.camera.provider@2.4-service
+    
+# oneplusCamera
+$(call inherit-product, vendor/addons/onepluscamera/config.mk)
 
 # Connectivity Engine support (CNE)
 PRODUCT_PACKAGES += \
@@ -545,7 +548,6 @@ PRODUCT_PACKAGES += \
 
 PRODUCT_COPY_FILES += \
     frameworks/native/data/etc/android.hardware.vr.high_performance.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.vr.high_performance.xml
-
 # Wifi
 PRODUCT_PACKAGES += \
     ipacm \
