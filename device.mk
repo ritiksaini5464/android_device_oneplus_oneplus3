@@ -221,11 +221,11 @@ PRODUCT_PROPERTY_OVERRIDES += \
 
 # Camera
 PRODUCT_PACKAGES += \
+    Snap \
     android.hardware.camera.provider@2.4-impl \
     android.hardware.camera.provider@2.4-service
     
-# oneplusCamera
-$(call inherit-product, vendor/addons/onepluscamera/config.mk)
+
 
 # Connectivity Engine support (CNE)
 PRODUCT_PACKAGES += \
@@ -277,7 +277,8 @@ PRODUCT_PACKAGES += \
 PRODUCT_PACKAGES += \
     android.hardware.drm@1.0-impl \
     android.hardware.drm@1.0-service \
-    android.hardware.drm@1.3-service.clearkey
+    android.hardware.drm@1.3-service.clearkey \
+    android.hardware.drm@1.3-service.widevine
 
 # Encryption
 PRODUCT_PACKAGES += \
@@ -341,8 +342,9 @@ PRODUCT_PACKAGES += \
 
 # Lights
 PRODUCT_PACKAGES += \
+    lights.msm8996 \
+    android.hardware.light@2.0-impl \
     android.hardware.light@2.0-service.oneplus3 \
-
 # Media
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/configs/media_codecs.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs.xml \
@@ -540,14 +542,7 @@ PRODUCT_PACKAGES += \
 PRODUCT_PACKAGES += \
     vndk-sp
 
-# VR
-PRODUCT_PACKAGES += \
-    vr.msm8996 \
-    android.hardware.vr@1.0-impl \
-    android.hardware.vr@1.0-service
 
-PRODUCT_COPY_FILES += \
-    frameworks/native/data/etc/android.hardware.vr.high_performance.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.vr.high_performance.xml
 # Wifi
 PRODUCT_PACKAGES += \
     ipacm \
