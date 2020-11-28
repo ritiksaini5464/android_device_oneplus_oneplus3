@@ -275,18 +275,7 @@ public class KeyHandler implements DeviceKeyHandler {
 
     @Override
     public Intent isActivityLaunchEvent(KeyEvent event) {
-        if (event.getAction() != KeyEvent.ACTION_UP) {
-            return null;
-        }
-        String value = getGestureValueForScanCode(event.getScanCode());
-        if (!TextUtils.isEmpty(value) && !value.equals(AppSelectListPreference.DISABLED_ENTRY)) {
-            if (DEBUG) Log.i(TAG, "isActivityLaunchEvent " + event.getScanCode() + value);
-            if (!launchSpecialActions(value)) {
-                Intent intent = createIntent(value);
-                return intent;
-            }
-        }
-        return null;
+      
     }
 
     private IAudioService getAudioService() {
