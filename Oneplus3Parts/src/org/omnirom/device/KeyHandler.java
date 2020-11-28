@@ -17,59 +17,439 @@
 */
 package org.omnirom.device;
 
-
+import android.app.ActivityManagerNative;
+import android.app.ActivityThread;
+import android.app.NotificationManager;
+import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.res.Resources;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.database.ContentObserver;
+import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+import android.media.IAudioService;
 import android.media.AudioManager;
-import android.os.Vibrator;
+import android.media.session.MediaSessionLegacyHelper;
+import android.text.TextUtils;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Message;
+import android.os.PowerManager;
+import android.os.PowerManager.WakeLock;
+import android.os.RemoteException;
+import android.os.ServiceManager;
+import android.os.SystemClock;
+import android.os.UserHandle;
+import android.provider.Settings;
+import android.provider.Settings.Global;
+import android.util.Log;
+import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.WindowManagerGlobal;
+import android.widget.Toast;
 
 import com.android.internal.os.DeviceKeyHandler;
+import com.android.internal.util.ArrayUtils;
+
+import org.omnirom.device.R;
 
 public class KeyHandler implements DeviceKeyHandler {
-    private static final String TAG = KeyHandler.class.getSimpleName();
 
-    // Slider key codes
-    private static final int MODE_NORMAL = 602;
-    private static final int MODE_VIBRATION = 601;
-    private static final int MODE_SILENCE = 600;
+    private static final String TAG = "KeyHandler";
+    private static final boolean DEBUG = true;
+    protected static final int GESTURE_REQUEST = 1;
+    private static final int GESTURE_WAKELOCK_DURATION = 2000;
+    private static final String KEY_CONTROL_PATH = "/proc/s1302/virtual_key";
+    private static final String FPC_CONTROL_PATH = "/sys/devices/soc/soc:fpc_fpc1020/proximity_state";
 
-    private final Context mContext;
+    private static final String PACKAGE_SYSTEMUI = "com.android.systemui";
+
+    private static final int GESTURE_CIRCLE_SCANCODE = 250;
+    private static final int GESTURE_V_SCANCODE = 252;
+    private static final int GESTURE_II_SCANCODE = 251;
+    private static final int GESTURE_LEFT_V_SCANCODE = 253;
+    private static final int GESTURE_RIGHT_V_SCANCODE = 254;
+    private static final int GESTURE_A_SCANCODE = 255;
+    private static final int GESTURE_RIGHT_SWIPE_SCANCODE = 63;
+    private static final int GESTURE_LEFT_SWIPE_SCANCODE = 64;
+    private static final int GESTURE_DOWN_SWIPE_SCANCODE = 65;
+    private static final int GESTURE_UP_SWIPE_SCANCODE = 66;
+
+    private static final int KEY_DOUBLE_TAP = 143;
+    private static final int KEY_SLIDER_TOP = 600;
+    private static final int KEY_SLIDER_CENTER = 601;
+    private static final int KEY_SLIDER_BOTTOM = 602;
+
+    private static final int[] sSupportedGestures = new int[]{
+        GESTURE_II_SCANCODE,
+        GESTURE_CIRCLE_SCANCODE,
+        GESTURE_V_SCANCODE,
+        GESTURE_A_SCANCODE,
+        GESTURE_LEFT_V_SCANCODE,
+        GESTURE_RIGHT_V_SCANCODE,
+        GESTURE_DOWN_SWIPE_SCANCODE,
+        GESTURE_UP_SWIPE_SCANCODE,
+        GESTURE_LEFT_SWIPE_SCANCODE,
+        GESTURE_RIGHT_SWIPE_SCANCODE,
+        KEY_DOUBLE_TAP,
+        KEY_SLIDER_TOP,
+        KEY_SLIDER_CENTER,
+        KEY_SLIDER_BOTTOM
+    };
+
+    private static final int[] sHandledGestures = new int[]{
+        KEY_SLIDER_TOP,
+        KEY_SLIDER_CENTER,
+        KEY_SLIDER_BOTTOM
+    };
+
+    private static final int[] sProxiCheckedGestures = new int[]{
+        GESTURE_II_SCANCODE,
+        GESTURE_CIRCLE_SCANCODE,
+        GESTURE_V_SCANCODE,
+        GESTURE_A_SCANCODE,
+        GESTURE_LEFT_V_SCANCODE,
+        GESTURE_RIGHT_V_SCANCODE,
+        GESTURE_DOWN_SWIPE_SCANCODE,
+        GESTURE_UP_SWIPE_SCANCODE,
+        GESTURE_LEFT_SWIPE_SCANCODE,
+        GESTURE_RIGHT_SWIPE_SCANCODE,
+        KEY_DOUBLE_TAP
+    };
+
+    protected final Context mContext;
+    private final PowerManager mPowerManager;
+    private EventHandler mEventHandler;
+    private SettingsObserver mSettingsObserver;
+    private WakeLock mGestureWakeLock;
+    private Handler mHandler = new Handler();
+    private final NotificationManager mNoMan;
     private final AudioManager mAudioManager;
-    private final Vibrator mVibrator;
+    private SensorManager mSensorManager;
+    private Sensor mSensor;
+    private boolean mProxyIsNear;
+    private boolean mUseProxiCheck;
+    private Toast toast;
+    private final Context mSysUiContext;
+    private final Context mResContext;
+
+    private SensorEventListener mProximitySensor = new SensorEventListener() {
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            mProxyIsNear = event.values[0] < mSensor.getMaximumRange();
+            if (DEBUG) Log.d(TAG, "mProxyIsNear = " + mProxyIsNear);
+            if(Utils.fileWritable(FPC_CONTROL_PATH)) {
+                Utils.writeValue(FPC_CONTROL_PATH, mProxyIsNear ? "1" : "0");
+            }
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        }
+    };
+
+    private class SettingsObserver extends ContentObserver {
+        SettingsObserver(Handler handler) {
+            super(handler);
+        }
+
+        void observe() {
+            mContext.getContentResolver().registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.DEVICE_PROXI_CHECK_ENABLED),
+                    false, this);
+            update();
+        }
+
+        @Override
+        public void onChange(boolean selfChange) {
+            update();
+        }
+
+        public void update() {
+            mUseProxiCheck = Settings.System.getIntForUser(
+                    mContext.getContentResolver(), Settings.System.DEVICE_PROXI_CHECK_ENABLED, 1,
+                    UserHandle.USER_CURRENT) == 1;
+        }
+    }
+
+  
+
+    private BroadcastReceiver mScreenStateReceiver = new BroadcastReceiver() {
+         @Override
+         public void onReceive(Context context, Intent intent) {
+             if (intent.getAction().equals(Intent.ACTION_SCREEN_ON)) {
+                 onDisplayOn();
+             } else if (intent.getAction().equals(Intent.ACTION_SCREEN_OFF)) {
+                 onDisplayOff();
+             }
+         }
+    };
 
     public KeyHandler(Context context) {
         mContext = context;
-
-        mAudioManager = mContext.getSystemService(AudioManager.class);
-        mVibrator = mContext.getSystemService(Vibrator.class);
+        mEventHandler = new EventHandler();
+        mPowerManager = (PowerManager) mContext.getSystemService(Context.POWER_SERVICE);
+        mGestureWakeLock = mPowerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
+                "GestureWakeLock");
+        mSettingsObserver = new SettingsObserver(mHandler);
+        mSettingsObserver.observe();
+        mNoMan = (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
+        mAudioManager = (AudioManager) mContext.getSystemService(Context.AUDIO_SERVICE);
+        mSensorManager = (SensorManager) mContext.getSystemService(Context.SENSOR_SERVICE);
+        mSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
+        IntentFilter screenStateFilter = new IntentFilter(Intent.ACTION_SCREEN_ON);
+        screenStateFilter.addAction(Intent.ACTION_SCREEN_OFF);
+        mContext.registerReceiver(mScreenStateReceiver, screenStateFilter);
+        mSysUiContext = ActivityThread.currentActivityThread().getSystemUiContext();
+        mResContext = getPackageContext(mContext, "org.omnirom.device");
     }
 
-    public KeyEvent handleKeyEvent(KeyEvent event) {
-        int scanCode = event.getScanCode();
-
-        switch (scanCode) {
-            case MODE_NORMAL:
-                mAudioManager.setRingerModeInternal(AudioManager.RINGER_MODE_NORMAL);
-                break;
-            case MODE_VIBRATION:
-                mAudioManager.setRingerModeInternal(AudioManager.RINGER_MODE_VIBRATE);
-                break;
-            case MODE_SILENCE:
-                mAudioManager.setRingerModeInternal(AudioManager.RINGER_MODE_SILENT);
-                break;
-            default:
-                return event;
+    private class EventHandler extends Handler {
+        @Override
+        public void handleMessage(Message msg) {
         }
-        doHapticFeedback();
+    }
 
+    @Override
+    public boolean handleKeyEvent(KeyEvent event) {
+        if (event.getAction() != KeyEvent.ACTION_UP) {
+            return false;
+        }
+
+        boolean isKeySupported = ArrayUtils.contains(sHandledGestures, event.getScanCode());
+        if (isKeySupported) {
+            if (DEBUG) Log.i(TAG, "scanCode=" + event.getScanCode());
+            switch(event.getScanCode()) {
+                case KEY_SLIDER_TOP:
+                    if (DEBUG) Log.i(TAG, "KEY_SLIDER_TOP");
+                    doHandleSliderAction(0, 0);
+                    return true;
+                case KEY_SLIDER_CENTER:
+                    if (DEBUG) Log.i(TAG, "KEY_SLIDER_CENTER");
+                    doHandleSliderAction(1, 30);
+                    return true;
+                case KEY_SLIDER_BOTTOM:
+                    if (DEBUG) Log.i(TAG, "KEY_SLIDER_BOTTOM");
+                    doHandleSliderAction(2, 60);
+                    return true;
+            }
+        }
+        return isKeySupported;
+    }
+
+    @Override
+    public boolean canHandleKeyEvent(KeyEvent event) {
+        return ArrayUtils.contains(sSupportedGestures, event.getScanCode());
+    }
+
+    @Override
+    public boolean isDisabledKeyEvent(KeyEvent event) {
+        boolean isProxyCheckRequired = mUseProxiCheck &&
+                ArrayUtils.contains(sProxiCheckedGestures, event.getScanCode());
+        if (mProxyIsNear && isProxyCheckRequired) {
+            if (DEBUG) Log.i(TAG, "isDisabledKeyEvent: blocked by proxi sensor - scanCode=" + event.getScanCode());
+            return true;
+        }
+        return false;
+    }
+
+    
+
+    @Override
+    public boolean isWakeEvent(KeyEvent event){
+        if (event.getAction() != KeyEvent.ACTION_UP) {
+            return false;
+        }
+        return event.getScanCode() == KEY_DOUBLE_TAP;
+    }
+
+    @Override
+    public Intent isActivityLaunchEvent(KeyEvent event) {
+        if (event.getAction() != KeyEvent.ACTION_UP) {
+            return null;
+        }
+        String value = getGestureValueForScanCode(event.getScanCode());
+        if (!TextUtils.isEmpty(value) && !value.equals(AppSelectListPreference.DISABLED_ENTRY)) {
+            if (DEBUG) Log.i(TAG, "isActivityLaunchEvent " + event.getScanCode() + value);
+            if (!launchSpecialActions(value)) {
+                Intent intent = createIntent(value);
+                return intent;
+            }
+        }
         return null;
     }
 
-    private void doHapticFeedback() {
-        if (mVibrator == null || !mVibrator.hasVibrator()) {
-            return;
+    private IAudioService getAudioService() {
+        IAudioService audioService = IAudioService.Stub
+                .asInterface(ServiceManager.checkService(Context.AUDIO_SERVICE));
+        if (audioService == null) {
+            Log.w(TAG, "Unable to find IAudioService interface.");
         }
+        return audioService;
+    }
 
-        mVibrator.vibrate(50);
+    boolean isMusicActive() {
+        return mAudioManager.isMusicActive();
+    }
+
+    private void dispatchMediaKeyWithWakeLockToAudioService(int keycode) {
+        if (ActivityManagerNative.isSystemReady()) {
+            IAudioService audioService = getAudioService();
+            if (audioService != null) {
+                KeyEvent event = new KeyEvent(SystemClock.uptimeMillis(),
+                        SystemClock.uptimeMillis(), KeyEvent.ACTION_DOWN,
+                        keycode, 0);
+                dispatchMediaKeyEventUnderWakelock(event);
+                event = KeyEvent.changeAction(event, KeyEvent.ACTION_UP);
+                dispatchMediaKeyEventUnderWakelock(event);
+            }
+        }
+    }
+
+    private void dispatchMediaKeyEventUnderWakelock(KeyEvent event) {
+        if (ActivityManagerNative.isSystemReady()) {
+            MediaSessionLegacyHelper.getHelper(mContext).sendMediaButtonEvent(event, true);
+        }
+    }
+
+   
+
+     private void onDisplayOn() {
+        if (mUseProxiCheck) {
+            if (DEBUG) Log.d(TAG, "Display on");
+            mSensorManager.unregisterListener(mProximitySensor, mSensor);
+        }
+    }
+
+    private void onDisplayOff() {
+        if (mUseProxiCheck) {
+            if (DEBUG) Log.d(TAG, "Display off");
+            mSensorManager.registerListener(mProximitySensor, mSensor,
+                        SensorManager.SENSOR_DELAY_NORMAL);
+        }
+    }
+
+    private int getSliderAction(int position) {
+        String value = Settings.System.getStringForUser(mContext.getContentResolver(),
+                    Settings.System.BUTTON_EXTRA_KEY_MAPPING,
+                    UserHandle.USER_CURRENT);
+        final String defaultValue = DeviceSettings.SLIDER_DEFAULT_VALUE;
+
+        if (value == null) {
+            value = defaultValue;
+        } else if (value.indexOf(",") == -1) {
+            value = defaultValue;
+        }
+        try {
+            String[] parts = value.split(",");
+            return Integer.valueOf(parts[position]);
+        } catch (Exception e) {
+        }
+        return 0;
+    }
+
+    private void doHandleSliderAction(int position, int yOffset) {
+        int action = getSliderAction(position);
+        if ( action == 0) {
+            mNoMan.setZenMode(Global.ZEN_MODE_OFF, null, TAG);
+            mAudioManager.setRingerModeInternal(AudioManager.RINGER_MODE_NORMAL);
+            showToast(R.string.toast_ringer, Toast.LENGTH_SHORT, yOffset);
+        } else if (action == 1) {
+            mNoMan.setZenMode(Global.ZEN_MODE_OFF, null, TAG);
+            mAudioManager.setRingerModeInternal(AudioManager.RINGER_MODE_VIBRATE);
+            showToast(R.string.toast_vibrate, Toast.LENGTH_SHORT, yOffset);
+        } else if (action == 2) {
+            mNoMan.setZenMode(Global.ZEN_MODE_IMPORTANT_INTERRUPTIONS, null, TAG);
+            mAudioManager.setRingerModeInternal(AudioManager.RINGER_MODE_NORMAL);
+            showToast(R.string.toast_dnd, Toast.LENGTH_SHORT, yOffset);
+        }
+    }
+
+    void showToast(int messageId, int duration, int yOffset) {
+        final String message = mResContext.getResources().getString(messageId);
+        Handler handler = new Handler(Looper.getMainLooper());
+        handler.post(new Runnable() {
+        @Override
+        public void run() {
+            if (toast != null) toast.cancel();
+                toast = Toast.makeText(mSysUiContext, message, duration);
+                toast.setGravity(Gravity.TOP|Gravity.LEFT, 0, yOffset);
+                toast.show();
+            }
+        });
+    }
+
+    public static Context getPackageContext(Context context, String packageName) {
+        Context pkgContext = null;
+        if (context.getPackageName().equals(packageName)) {
+            pkgContext = context;
+        } else {
+            try {
+                pkgContext = context.createPackageContext(packageName,
+                        Context.CONTEXT_IGNORE_SECURITY
+                                | Context.CONTEXT_INCLUDE_CODE);
+            } catch (PackageManager.NameNotFoundException e) {
+                e.printStackTrace();
+            }
+        }
+        return pkgContext;
+    }
+
+    private Intent createIntent(String value) {
+        ComponentName componentName = ComponentName.unflattenFromString(value);
+        Intent intent = new Intent(Intent.ACTION_MAIN);
+        intent.addCategory(Intent.CATEGORY_LAUNCHER);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+        intent.setComponent(componentName);
+        return intent;
+    }
+
+  
+
+    private String getGestureValueForScanCode(int scanCode) {
+        switch(scanCode) {
+            case GESTURE_II_SCANCODE:
+                return Settings.System.getStringForUser(mContext.getContentResolver(),
+                    GestureSettings.DEVICE_GESTURE_MAPPING_0, UserHandle.USER_CURRENT);
+            case GESTURE_CIRCLE_SCANCODE:
+                return Settings.System.getStringForUser(mContext.getContentResolver(),
+                    GestureSettings.DEVICE_GESTURE_MAPPING_1, UserHandle.USER_CURRENT);
+            case GESTURE_V_SCANCODE:
+                return Settings.System.getStringForUser(mContext.getContentResolver(),
+                    GestureSettings.DEVICE_GESTURE_MAPPING_2, UserHandle.USER_CURRENT);
+            case GESTURE_A_SCANCODE:
+                return Settings.System.getStringForUser(mContext.getContentResolver(),
+                    GestureSettings.DEVICE_GESTURE_MAPPING_3, UserHandle.USER_CURRENT);
+            case GESTURE_LEFT_V_SCANCODE:
+                return Settings.System.getStringForUser(mContext.getContentResolver(),
+                    GestureSettings.DEVICE_GESTURE_MAPPING_4, UserHandle.USER_CURRENT);
+            case GESTURE_RIGHT_V_SCANCODE:
+                return Settings.System.getStringForUser(mContext.getContentResolver(),
+                    GestureSettings.DEVICE_GESTURE_MAPPING_5, UserHandle.USER_CURRENT);
+            case GESTURE_DOWN_SWIPE_SCANCODE:
+                return Settings.System.getStringForUser(mContext.getContentResolver(),
+                    GestureSettings.DEVICE_GESTURE_MAPPING_6, UserHandle.USER_CURRENT);
+            case GESTURE_UP_SWIPE_SCANCODE:
+                return Settings.System.getStringForUser(mContext.getContentResolver(),
+                    GestureSettings.DEVICE_GESTURE_MAPPING_7, UserHandle.USER_CURRENT);
+            case GESTURE_LEFT_SWIPE_SCANCODE:
+                return Settings.System.getStringForUser(mContext.getContentResolver(),
+                    GestureSettings.DEVICE_GESTURE_MAPPING_8, UserHandle.USER_CURRENT);
+            case GESTURE_RIGHT_SWIPE_SCANCODE:
+                return Settings.System.getStringForUser(mContext.getContentResolver(),
+                    GestureSettings.DEVICE_GESTURE_MAPPING_9, UserHandle.USER_CURRENT);
+        }
+        return null;
     }
 }
