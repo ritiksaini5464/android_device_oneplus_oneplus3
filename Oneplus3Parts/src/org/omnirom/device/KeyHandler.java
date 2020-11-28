@@ -17,51 +17,13 @@
 */
 package org.omnirom.device;
 
-import android.app.ActivityManagerNative;
-import android.app.ActivityThread;
-import android.app.NotificationManager;
-import android.content.BroadcastReceiver;
-import android.content.ComponentName;
+
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
-import android.content.res.Resources;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
-import android.database.ContentObserver;
-import android.hardware.camera2.CameraAccessException;
-import android.hardware.camera2.CameraCharacteristics;
-import android.hardware.camera2.CameraManager;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
-import android.media.IAudioService;
 import android.media.AudioManager;
-import android.media.session.MediaSessionLegacyHelper;
-import android.text.TextUtils;
-import android.os.Handler;
-import android.os.Looper;
-import android.os.Message;
-import android.os.PowerManager;
-import android.os.PowerManager.WakeLock;
-import android.os.RemoteException;
-import android.os.ServiceManager;
-import android.os.SystemClock;
-import android.os.UserHandle;
-import android.provider.Settings;
-import android.provider.Settings.Global;
-import android.util.Log;
-import android.view.Gravity;
+import android.os.Vibrator;
 import android.view.KeyEvent;
-import android.view.WindowManagerGlobal;
-import android.widget.Toast;
 
 import com.android.internal.os.DeviceKeyHandler;
-import com.android.internal.util.ArrayUtils;
-
-import org.omnirom.device.R;
 
 public class KeyHandler implements DeviceKeyHandler {
     private static final String TAG = KeyHandler.class.getSimpleName();
