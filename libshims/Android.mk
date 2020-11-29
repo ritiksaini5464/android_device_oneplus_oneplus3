@@ -19,14 +19,14 @@ LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := \
-    GraphicBuffer.cpp
+	GraphicBuffer.cpp
 
-LOCAL_SHARED_LIBRARIES := libui
-LOCAL_MODULE := libui_shim
+LOCAL_SHARED_LIBRARIES := libui libutils
+LOCAL_MODULE := libmms_hal_vstab_shim
 LOCAL_MODULE_TAGS := optional
-LOCAL_MODULE_CLASS := SHARED_LIBRARIES
+LOCAL_PROPRIETARY_MODULE := true
 
-include $(BUILD_SHARED_LIBRARY)
+include $(BUILD_SHARED_LIBRARY))
 
 include $(CLEAR_VARS)
 
